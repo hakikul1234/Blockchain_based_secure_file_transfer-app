@@ -12,6 +12,10 @@ from blockchain import Blockchain
 import random
 import time
 from twilio.rest import Client
+import joblib
+from feature_extractor import extract_features
+
+
 
 
 # -------------------- Setup --------------------
@@ -19,6 +23,10 @@ socketio = SocketIO(app)
 blockchain = Blockchain()
 otp_store = {}  
 # format: { file_hash: (otp, expiry_time) }
+
+# -------------------- ML Model Load --------------------
+model = joblib.load("malware_model.pkl")
+
 
 
 IPFS_API = "http://127.0.0.1:5001/api/v0"  # local IPFS HTTP API
@@ -96,6 +104,16 @@ def send_sms_otp(phone, otp):
         to=phone
     )
 
+# -------------------- ML Malware Detection --------------------
+def is_file_safe(file_path):
+    try:
+        features = extract_features(file_path)
+        prediction = model.predict([features])
+        return prediction[0] == 0  # 0 = Safe, 1 = Malicious
+    except Exception as e:
+        print("ML Error:", e)
+        return False
+
 
 # -------------------- Flask Routes --------------------
 @app.route('/')
@@ -149,7 +167,10 @@ def add_file():
                 filename = secure_filename(user_file.filename)
                 file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
                 user_file.save(file_path)
-
+                if not is_file_safe(file_path):
+                    os.remove(file_path)
+                    message = "File detected as malicious and rejected!"
+                    return render_template('upload.html', message=message)
                 append_file_extension(user_file, file_path)
 
                 sender = request.form['sender_name']
@@ -289,3 +310,5 @@ def handle_disconnect():
 # -------------------- Main --------------------
 if __name__ == '__main__':
     socketio.run(app, host='127.0.0.1', port=5111)
+
+
